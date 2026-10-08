@@ -1,0 +1,28 @@
+/* ==========================================
+   FUENTES Y RESET
+   ========================================== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=OpenDyslexic:wght@400;700&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--fuente, 'Inter', sans-serif);
+  font-size: var(--tamano-fuente, 16px);
+  line-height: var(--espaciado, 1.5);
+  background-color: var(--color-fondo, #0a0e0c);
+  color: var(--color-texto, #edf2f0);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease, font-size 0.3s ease;
+  overflow-x: hidden;
+}
+
+/* ... resto de tu CSS ya existente, pero usando variables CSS en lugar de valores fijos */
+/* Por ejemplo, reemplazar colores fijos por var(--color-primary), etc. */
+/* Esto lo haremos gradualmente en los componentes, pero puedes ir adaptando */
