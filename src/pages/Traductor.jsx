@@ -4,7 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAvatar } from '../context/AvatarContext';
 import { 
   ArrowLeft, Languages, BookOpen, Camera, CameraOff, MessageSquare, 
-  RefreshCw, Search, RotateCcw, Sparkles, Mic, MicOff, PlusCircle, Save, FolderOpen, Trash2
+  RefreshCw, Search, RotateCcw, Sparkles, Mic, MicOff, PlusCircle, Save, FolderOpen, Trash2, Download, Upload
 } from 'lucide-react';
 
 const DICCIONARIO_SENAS = [
@@ -50,6 +50,7 @@ function Traductor() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const animationRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Texto a señas
   const [frase, setFrase] = useState('');
@@ -63,30 +64,7 @@ function Traductor() {
   const [busqueda, setBusqueda] = useState('');
   const [palabraSeleccionada, setPalabraSeleccionada] = useState(null);
 
-  // ===== FUNCIÓN AUXILIAR PARA CARGAR MODELO DESDE LOCALSTORAGE =====
-  const restaurarModeloGuardado = () => {
-    try {
-      const guardado = localStorage.getItem('modeloSeñasDataset');
-      const conteoGuardado = localStorage.getItem('conteoMuestrasSeñas');
-      if (guardado && knnClassifierRef.current && window.tf) {
-        const datasetObj = JSON.parse(guardado);
-        const tensorDataset = {};
-        Object.keys(datasetObj).forEach(key => {
-          tensorDataset[key] = window.tf.tensor2d(datasetObj[key], [datasetObj[key].length / 63, 63]);
-        });
-        knnClassifierRef.current.setClassifierDataset(tensorDataset);
-        if (conteoGuardado) {
-          setConteoMuestras(JSON.parse(conteoGuardado));
-        }
-        return true;
-      }
-    } catch (err) {
-      console.error('Error al restaurar el modelo guardado:', err);
-    }
-    return false;
-  };
-
-  // ===== CARGAR LIBRERÍAS DE MEDIAPIPE Y TENSORFLOW.JS / KNN =====
+  // ===== RESTAURAR DESDE LOCALSTORAGE O INTENTAR ARCHIVO PÚBLICO =====
   useEffect(() => {
     const cargarLibreriasIA = async () => {
       try {
@@ -120,8 +98,39 @@ function Traductor() {
         }
 
         knnClassifierRef.current = window.knnClassifier.create();
-        // Cargar automáticamente si ya existe un entrenamiento guardado
-        restaurarModeloGuardado();
+        
+        // 1. Intentar cargar de localStorage del navegador
+        const guardado = localStorage.getItem('modeloSeñasDataset');
+        const conteoGuardado = localStorage.getItem('conteoMuestrasSeñas');
+        
+        if (guardado) {
+          const datasetObj = JSON.parse(guardado);
+          const tensorDataset = {};
+          Object.keys(datasetObj).forEach(key => {
+            tensorDataset[key] = window.tf.tensor2d(datasetObj[key], [datasetObj[key].length / 63, 63]);
+          });
+          knnClassifierRef.current.setClassifierDataset(tensorDataset);
+          if (conteoGuardado) setConteoMuestras(JSON.parse(conteoGuardado));
+        } else {
+          // 2. Si no hay en localStorage, intentar cargar el archivo JSON predeterminado del proyecto (/public/modelo-senas.json)
+          try {
+            const response = await fetch('/modelo-senas.json');
+            if (response.ok) {
+              const data = await response.json();
+              if (data.dataset && data.conteo) {
+                const tensorDataset = {};
+                Object.keys(data.dataset).forEach(key => {
+                  tensorDataset[key] = window.tf.tensor2d(data.dataset[key], [data.dataset[key].length / 63, 63]);
+                });
+                knnClassifierRef.current.setClassifierDataset(tensorDataset);
+                setConteoMuestras(data.conteo);
+              }
+            }
+          } catch (e) {
+            console.log('No hay modelo predeterminado en public, listo para entrenar.');
+          }
+        }
+
         setIaLista(true);
       } catch (error) {
         console.error('Error al cargar modelos de IA:', error);
@@ -148,9 +157,7 @@ function Traductor() {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) final += event.results[i][0].transcript;
       }
-      if (final) {
-        setFrase(final);
-      }
+      if (final) setFrase(final);
     };
     recognitionRef.current = recognition;
     return () => { try { recognition.abort(); } catch (e) {} };
@@ -275,7 +282,6 @@ function Traductor() {
     setLandmarks([]);
   };
 
-  // ===== CONVERTIR LANDMARKS A TENSOR =====
   const obtenerTensorDeLandmarks = (lms) => {
     const baseX = lms[0].x;
     const baseY = lms[0].y;
@@ -290,7 +296,6 @@ function Traductor() {
     return window.tf.tensor1d(datosPlanos);
   };
 
-  // ===== ENTRENAR UNA SEÑA =====
   const entrenarEjemplo = () => {
     if (landmarks.length === 0) {
       alert('Coloca tu mano frente a la cámara para entrenar.');
@@ -306,10 +311,10 @@ function Traductor() {
     }));
   };
 
-  // ===== GUARDAR / CARGAR / BORRAR MODELO =====
-  const guardarModelo = () => {
+  // ===== EXPORTAR ENTRENAMIENTO A JSON (PARA SUBIR AL REPO) =====
+  const descargarModeloJSON = () => {
     if (!knnClassifierRef.current || knnClassifierRef.current.getNumClasses() === 0) {
-      alert('No hay muestras entrenadas para guardar.');
+      alert('No hay muestras entrenadas para exportar.');
       return;
     }
     const dataset = knnClassifierRef.current.getClassifierDataset();
@@ -317,32 +322,55 @@ function Traductor() {
     Object.keys(dataset).forEach(key => {
       datasetObj[key] = Array.from(dataset[key].dataSync());
     });
-    localStorage.setItem('modeloSeñasDataset', JSON.stringify(datasetObj));
-    localStorage.setItem('conteoMuestrasSeñas', JSON.stringify(conteoMuestras));
-    alert('¡Modelo y muestras guardados con éxito en el navegador!');
+
+    const objetoCompleto = {
+      dataset: datasetObj,
+      conteo: conteoMuestras
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(objetoCompleto));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", "modelo-senas.json");
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    alert('¡Archivo descargado! Guárdalo en la carpeta "public" de tu proyecto y haz git push.');
   };
 
-  const cargarModeloManual = () => {
-    const exito = restaurarModeloGuardado();
-    if (exito) {
-      alert('¡Modelo cargado correctamente desde el almacenamiento!');
-    } else {
-      alert('No hay ningún modelo guardado previamente.');
+  // ===== IMPORTAR DESDE ARCHIVO JSON =====
+  const manejarImportacionArchivo = (e) => {
+    const fileReader = new FileReader();
+    if (e.target.files && e.target.files[0]) {
+      fileReader.readAsText(e.target.files[0], "UTF-8");
+      fileReader.onload = (event) => {
+        try {
+          const parsedData = JSON.parse(event.target.result);
+          if (parsedData.dataset && parsedData.conteo) {
+            const tensorDataset = {};
+            Object.keys(parsedData.dataset).forEach(key => {
+              tensorDataset[key] = window.tf.tensor2d(parsedData.dataset[key], [parsedData.dataset[key].length / 63, 63]);
+            });
+            knnClassifierRef.current.setClassifierDataset(tensorDataset);
+            setConteoMuestras(parsedData.conteo);
+            alert('¡Modelo importado con éxito!');
+          }
+        } catch (error) {
+          alert('El archivo no es válido.');
+        }
+      };
     }
   };
 
   const borrarModeloGuardado = () => {
-    if (!window.confirm('¿Seguro que deseas borrar todo el entrenamiento guardado?')) return;
+    if (!window.confirm('¿Seguro que deseas borrar todo el entrenamiento?')) return;
     localStorage.removeItem('modeloSeñasDataset');
     localStorage.removeItem('conteoMuestrasSeñas');
-    if (knnClassifierRef.current) {
-      knnClassifierRef.current.clearAllClasses();
-    }
+    if (knnClassifierRef.current) knnClassifierRef.current.clearAllClasses();
     setConteoMuestras({});
     alert('Entrenamiento eliminado.');
   };
 
-  // ===== RECONOCER SEÑA =====
   const reconocerSeña = async () => {
     if (!camaraActiva) return;
     if (landmarks.length === 0) {
@@ -350,7 +378,7 @@ function Traductor() {
       return;
     }
     if (!knnClassifierRef.current || knnClassifierRef.current.getNumClasses() === 0) {
-      alert('El modelo no ha sido entrenado. Activa el modo entrenamiento y agrega muestras primero.');
+      alert('El modelo no ha sido entrenado.');
       return;
     }
 
@@ -572,11 +600,11 @@ function Traductor() {
                     <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '8px', color: '#f39c12' }}>
                       Entrenar Señas / Letras
                     </h3>
-                    <p style={{ fontSize: '12px', color: textMuted, marginBottom: '16px' }}>
-                      Escribe la letra, haz el gesto frente a la cámara (moviendo un poco la mano) y agrega varias muestras. Luego guarda el modelo.
+                    <p style={{ fontSize: '12px', color: textMuted, marginBottom: '14px' }}>
+                      Entrena tus letras. Usa <strong>"Exportar JSON"</strong> para guardar el archivo en la carpeta <code>public</code> de tu proyecto y que le funcione a tu compañera.
                     </p>
 
-                    <div style={{ marginBottom: '16px' }}>
+                    <div style={{ marginBottom: '12px' }}>
                       <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
                         Letra a entrenar:
                       </label>
@@ -595,7 +623,7 @@ function Traductor() {
                     <button
                       onClick={entrenarEjemplo}
                       style={{
-                        width: '100%', padding: '14px', borderRadius: '12px', border: 'none',
+                        width: '100%', padding: '12px', borderRadius: '12px', border: 'none',
                         background: '#f39c12', color: '#fff', fontWeight: 700, cursor: 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
                         marginBottom: '10px'
@@ -604,33 +632,38 @@ function Traductor() {
                       <PlusCircle size={18} /> Agregar Muestra para "{letraEntrenando}"
                     </button>
 
-                    {/* Botones de Persistencia */}
+                    {/* Botones de Exportar / Importar Archivo */}
+                    <input 
+                      type="file" ref={fileInputRef} onChange={manejarImportacionArchivo} 
+                      accept=".json" style={{ display: 'none' }} 
+                    />
+
                     <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
                       <button
-                        onClick={guardarModelo}
+                        onClick={descargarModeloJSON}
                         style={{
                           flex: 1, padding: '10px', borderRadius: '10px', border: 'none',
-                          background: '#2e9a6e', color: '#fff', fontSize: '12px', fontWeight: 600,
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                          background: '#2e9a6e', color: '#fff', fontSize: '11px', fontWeight: 600,
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
                         }}
                       >
-                        <Save size={14} /> Guardar
+                        <Download size={14} /> Exportar JSON
                       </button>
 
                       <button
-                        onClick={cargarModeloManual}
+                        onClick={() => fileInputRef.current.click()}
                         style={{
                           flex: 1, padding: '10px', borderRadius: '10px', border: `1px solid ${borderColor}`,
-                          background: inputBg, color: textColor, fontSize: '12px', fontWeight: 600,
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                          background: inputBg, color: textColor, fontSize: '11px', fontWeight: 600,
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
                         }}
                       >
-                        <FolderOpen size={14} /> Cargar
+                        <Upload size={14} /> Importar
                       </button>
 
                       <button
                         onClick={borrarModeloGuardado}
-                        title="Borrar entrenamiento guardado"
+                        title="Borrar entrenamiento"
                         style={{
                           padding: '10px 12px', borderRadius: '10px', border: '1px solid rgba(231,76,60,0.3)',
                           background: 'rgba(231,76,60,0.1)', color: '#e74c3c',
@@ -643,7 +676,7 @@ function Traductor() {
 
                     <div style={{ fontSize: '12px', color: textMuted }}>
                       <strong>Muestras guardadas ({Object.keys(conteoMuestras).length} letras):</strong>
-                      <div style={{ marginTop: '6px', maxHeight: '140px', overflowY: 'auto', paddingRight: '4px' }}>
+                      <div style={{ marginTop: '6px', maxHeight: '120px', overflowY: 'auto', paddingRight: '4px' }}>
                         {Object.entries(conteoMuestras).map(([letra, count]) => (
                           <div key={letra} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${borderColor}` }}>
                             <span>Letra <strong>{letra}</strong>:</span>
@@ -696,7 +729,7 @@ function Traductor() {
                       marginTop: '16px', padding: '8px 12px', background: inputBg,
                       borderRadius: '8px', fontSize: '11px', color: textMuted, textAlign: 'center'
                     }}>
-                      Letras entrenadas en memoria: <strong>{Object.keys(conteoMuestras).length}</strong>
+                      Letras listas en memoria: <strong>{Object.keys(conteoMuestras).length}</strong>
                     </div>
                   </div>
                 )}
