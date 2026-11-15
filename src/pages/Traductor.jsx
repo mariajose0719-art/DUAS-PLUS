@@ -4,7 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAvatar } from '../context/AvatarContext';
 import { 
   ArrowLeft, Languages, BookOpen, Camera, CameraOff, MessageSquare, 
-  RefreshCw, Search, Hand, RotateCcw, Sparkles, Mic, MicOff
+  RefreshCw, Search, RotateCcw, Sparkles, Mic, MicOff, PlusCircle, Save, FolderOpen, Trash2
 } from 'lucide-react';
 
 const DICCIONARIO_SENAS = [
@@ -29,22 +29,27 @@ function Traductor() {
   const [errorCamara, setErrorCamara] = useState(null);
   const [camaraLista, setCamaraLista] = useState(false);
   
-  // MediaPipe
-  const [mediaPipeListo, setMediaPipeListo] = useState(false);
+  // MediaPipe & TensorFlow / KNN
+  const [iaLista, setIaLista] = useState(false);
   const handsRef = useRef(null);
+  const knnClassifierRef = useRef(null);
   const [landmarks, setLandmarks] = useState([]);
   
-  // Reconocimiento de señas
+  // Reconocimiento y Entrenamiento
   const [textoDeletreado, setTextoDeletreado] = useState('');
   const [detectando, setDetectando] = useState(false);
   const [letraActual, setLetraActual] = useState('');
   const [letrasDetectadas, setLetrasDetectadas] = useState([]);
   
+  // Panel de entrenamiento
+  const [letraEntrenando, setLetraEntrenando] = useState('A');
+  const [conteoMuestras, setConteoMuestras] = useState({});
+  const [modoEntrenamiento, setModoEntrenamiento] = useState(false);
+  
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const animationRef = useRef(null);
-  const intervalRef = useRef(null);
 
   // Texto a señas
   const [frase, setFrase] = useState('');
@@ -53,53 +58,77 @@ function Traductor() {
   const [escuchando, setEscuchando] = useState(false);
   const [soporteVoz, setSoporteVoz] = useState(true);
   const recognitionRef = useRef(null);
-  const escuchandoRef = useRef(false);
-  
-  // Detección de audio con Web Audio API
-  const audioStreamRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const audioDetectionRef = useRef(null);
-  const speechDetectedRef = useRef(false);
-  const dictadoTimeoutRef = useRef(null);
 
   // Diccionario
   const [busqueda, setBusqueda] = useState('');
   const [palabraSeleccionada, setPalabraSeleccionada] = useState(null);
 
-  // ===== CARGAR MEDIAPIPE HANDS =====
+  // ===== FUNCIÓN AUXILIAR PARA CARGAR MODELO DESDE LOCALSTORAGE =====
+  const restaurarModeloGuardado = () => {
+    try {
+      const guardado = localStorage.getItem('modeloSeñasDataset');
+      const conteoGuardado = localStorage.getItem('conteoMuestrasSeñas');
+      if (guardado && knnClassifierRef.current && window.tf) {
+        const datasetObj = JSON.parse(guardado);
+        const tensorDataset = {};
+        Object.keys(datasetObj).forEach(key => {
+          tensorDataset[key] = window.tf.tensor2d(datasetObj[key], [datasetObj[key].length / 63, 63]);
+        });
+        knnClassifierRef.current.setClassifierDataset(tensorDataset);
+        if (conteoGuardado) {
+          setConteoMuestras(JSON.parse(conteoGuardado));
+        }
+        return true;
+      }
+    } catch (err) {
+      console.error('Error al restaurar el modelo guardado:', err);
+    }
+    return false;
+  };
+
+  // ===== CARGAR LIBRERÍAS DE MEDIAPIPE Y TENSORFLOW.JS / KNN =====
   useEffect(() => {
-    const cargarMediaPipe = async () => {
+    const cargarLibreriasIA = async () => {
       try {
-        if (!window.Hands) {
+        if (!window.tf) {
           await new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js';
-            script.crossOrigin = 'anonymous';
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js';
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
           });
         }
-        
-        if (!window.Camera) {
+        if (!window.knnClassifier) {
           await new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js';
-            script.crossOrigin = 'anonymous';
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier@1.2.4/dist/knn-classifier.min.js';
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
+        }
+        if (!window.Hands) {
+          await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js';
+            s.crossOrigin = 'anonymous';
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
           });
         }
 
-        setMediaPipeListo(true);
+        knnClassifierRef.current = window.knnClassifier.create();
+        // Cargar automáticamente si ya existe un entrenamiento guardado
+        restaurarModeloGuardado();
+        setIaLista(true);
       } catch (error) {
-        console.error('Error al cargar MediaPipe:', error);
-        setMediaPipeListo(false);
+        console.error('Error al cargar modelos de IA:', error);
+        setIaLista(false);
       }
     };
-    cargarMediaPipe();
+    cargarLibreriasIA();
   }, []);
 
   // ===== CONFIGURAR RECONOCIMIENTO DE VOZ =====
@@ -109,7 +138,6 @@ function Traductor() {
       setSoporteVoz(false);
       return;
     }
-    
     const recognition = new SpeechRecognition();
     recognition.lang = 'es-ES';
     recognition.continuous = true;
@@ -118,42 +146,19 @@ function Traductor() {
     recognition.onresult = (event) => {
       let final = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript;
-        }
+        if (event.results[i].isFinal) final += event.results[i][0].transcript;
       }
       if (final) {
         setFrase(final);
-        stopDictado();
       }
     };
-
-    recognition.onerror = (e) => {
-      if (e.error === 'no-speech') return;
-      if (e.error === 'network') {
-        // Error de red: la detección real la maneja Web Audio API
-        return;
-      }
-      // Otros errores
-      escuchandoRef.current = false;
-      setEscuchando(false);
-    };
-
-    recognition.onend = () => {
-      // No reiniciar automáticamente aquí. El control lo maneja toggleEscucha.
-    };
-
     recognitionRef.current = recognition;
-
-    return () => {
-      escuchandoRef.current = false;
-      try { recognition.abort(); } catch (e) {}
-    };
+    return () => { try { recognition.abort(); } catch (e) {} };
   }, []);
 
   // ===== INICIALIZAR HANDS =====
   useEffect(() => {
-    if (!camaraActiva || !mediaPipeListo || !window.Hands) return;
+    if (!camaraActiva || !iaLista || !window.Hands) return;
     
     const hands = new window.Hands({
       locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
@@ -175,13 +180,10 @@ function Traductor() {
     });
 
     handsRef.current = hands;
-    return () => {
-      handsRef.current = null;
-      setLandmarks([]);
-    };
-  }, [camaraActiva, mediaPipeListo]);
+    return () => { handsRef.current = null; setLandmarks([]); };
+  }, [camaraActiva, iaLista]);
 
-  // ===== PROCESAR FRAMES =====
+  // ===== PROCESAR FRAMES DE CÁMARA =====
   useEffect(() => {
     if (!camaraActiva || !camaraLista || !handsRef.current) return;
 
@@ -195,9 +197,7 @@ function Traductor() {
     };
 
     procesarFrame();
-    return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    };
+    return () => { if (animationRef.current) cancelAnimationFrame(animationRef.current); };
   }, [camaraActiva, camaraLista]);
 
   // ===== DIBUJAR LANDMARKS =====
@@ -224,12 +224,9 @@ function Traductor() {
       ctx.beginPath();
       ctx.moveTo(p1.x * canvas.width, p1.y * canvas.height);
       ctx.lineTo(p2.x * canvas.width, p2.y * canvas.height);
-      ctx.strokeStyle = 'rgba(46, 154, 110, 0.9)';
+      ctx.strokeStyle = modoEntrenamiento ? 'rgba(243,156,18,0.9)' : 'rgba(46, 154, 110, 0.9)';
       ctx.lineWidth = 3;
-      ctx.shadowColor = '#2e9a6e';
-      ctx.shadowBlur = 10;
       ctx.stroke();
-      ctx.shadowBlur = 0;
     });
 
     landmarks.forEach((lm, idx) => {
@@ -237,15 +234,10 @@ function Traductor() {
       const y = lm.y * canvas.height;
       ctx.beginPath();
       ctx.arc(x, y, idx === 0 ? 8 : 5, 0, Math.PI * 2);
-      ctx.fillStyle = idx === 0 ? '#f39c12' : '#2e9a6e';
+      ctx.fillStyle = idx === 0 ? '#f39c12' : (modoEntrenamiento ? '#f39c12' : '#2e9a6e');
       ctx.fill();
-      ctx.beginPath();
-      ctx.arc(x, y, idx === 0 ? 8 : 5, 0, Math.PI * 2);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
     });
-  }, [landmarks]);
+  }, [landmarks, modoEntrenamiento]);
 
   // ===== CÁMARA =====
   const activarCamara = async () => {
@@ -257,7 +249,6 @@ function Traductor() {
       streamRef.current = stream;
       setCamaraActiva(true);
     } catch (error) {
-      console.error('Error al acceder a la cámara:', error);
       setErrorCamara('No se pudo acceder a la cámara.');
     }
   };
@@ -267,13 +258,12 @@ function Traductor() {
       videoRef.current.srcObject = streamRef.current;
       videoRef.current.play()
         .then(() => setCamaraLista(true))
-        .catch(err => console.error('Error:', err));
+        .catch(err => console.error(err));
     }
   }, [camaraActiva]);
 
   const detenerCamara = () => {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    if (intervalRef.current) clearInterval(intervalRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -285,154 +275,128 @@ function Traductor() {
     setLandmarks([]);
   };
 
-  // ===== LEER SEÑA =====
-  const reconocerSeña = () => {
-    if (!camaraActiva) return;
-    setDetectando(true);
-    setTextoDeletreado('');
-    setLetrasDetectadas([]);
-    setLetraActual('');
+  // ===== CONVERTIR LANDMARKS A TENSOR =====
+  const obtenerTensorDeLandmarks = (lms) => {
+    const baseX = lms[0].x;
+    const baseY = lms[0].y;
+    const baseZ = lms[0].z || 0;
 
-    const palabra = 'HOLA';
-    let index = 0;
-
-    intervalRef.current = setInterval(() => {
-      if (index < palabra.length) {
-        const letra = palabra[index];
-        setLetraActual(letra);
-        setLetrasDetectadas(prev => [...prev, letra]);
-        setTextoDeletreado(palabra.substring(0, index + 1));
-        index++;
-      } else {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-        setDetectando(false);
-        setLetraActual('');
-      }
-    }, 1800);
+    const datosPlanos = [];
+    lms.forEach(pt => {
+      datosPlanos.push(pt.x - baseX);
+      datosPlanos.push(pt.y - baseY);
+      datosPlanos.push((pt.z || 0) - baseZ);
+    });
+    return window.tf.tensor1d(datosPlanos);
   };
 
-  const reiniciarDeteccion = () => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    setTextoDeletreado('');
-    setLetrasDetectadas([]);
-    setLetraActual('');
+  // ===== ENTRENAR UNA SEÑA =====
+  const entrenarEjemplo = () => {
+    if (landmarks.length === 0) {
+      alert('Coloca tu mano frente a la cámara para entrenar.');
+      return;
+    }
+    const tensor = obtenerTensorDeLandmarks(landmarks);
+    knnClassifierRef.current.addExample(tensor, letraEntrenando);
+    tensor.dispose();
+
+    setConteoMuestras(prev => ({
+      ...prev,
+      [letraEntrenando]: (prev[letraEntrenando] || 0) + 1
+    }));
+  };
+
+  // ===== GUARDAR / CARGAR / BORRAR MODELO =====
+  const guardarModelo = () => {
+    if (!knnClassifierRef.current || knnClassifierRef.current.getNumClasses() === 0) {
+      alert('No hay muestras entrenadas para guardar.');
+      return;
+    }
+    const dataset = knnClassifierRef.current.getClassifierDataset();
+    const datasetObj = {};
+    Object.keys(dataset).forEach(key => {
+      datasetObj[key] = Array.from(dataset[key].dataSync());
+    });
+    localStorage.setItem('modeloSeñasDataset', JSON.stringify(datasetObj));
+    localStorage.setItem('conteoMuestrasSeñas', JSON.stringify(conteoMuestras));
+    alert('¡Modelo y muestras guardados con éxito en el navegador!');
+  };
+
+  const cargarModeloManual = () => {
+    const exito = restaurarModeloGuardado();
+    if (exito) {
+      alert('¡Modelo cargado correctamente desde el almacenamiento!');
+    } else {
+      alert('No hay ningún modelo guardado previamente.');
+    }
+  };
+
+  const borrarModeloGuardado = () => {
+    if (!window.confirm('¿Seguro que deseas borrar todo el entrenamiento guardado?')) return;
+    localStorage.removeItem('modeloSeñasDataset');
+    localStorage.removeItem('conteoMuestrasSeñas');
+    if (knnClassifierRef.current) {
+      knnClassifierRef.current.clearAllClasses();
+    }
+    setConteoMuestras({});
+    alert('Entrenamiento eliminado.');
+  };
+
+  // ===== RECONOCER SEÑA =====
+  const reconocerSeña = async () => {
+    if (!camaraActiva) return;
+    if (landmarks.length === 0) {
+      alert('No se detecta ninguna mano.');
+      return;
+    }
+    if (!knnClassifierRef.current || knnClassifierRef.current.getNumClasses() === 0) {
+      alert('El modelo no ha sido entrenado. Activa el modo entrenamiento y agrega muestras primero.');
+      return;
+    }
+
+    setDetectando(true);
+    const tensor = obtenerTensorDeLandmarks(landmarks);
+
+    try {
+      const res = await knnClassifierRef.current.predictClass(tensor);
+      tensor.dispose();
+
+      if (res && res.label && res.confidences[res.label] > 0.3) {
+        const letraEncontrada = res.label;
+        setLetraActual(letraEncontrada);
+        setLetrasDetectadas(prev => [...prev, letraEncontrada]);
+        setTextoDeletreado(prev => prev + letraEncontrada);
+      } else {
+        setLetraActual('?');
+      }
+    } catch (e) {
+      console.error(e);
+    }
     setDetectando(false);
   };
 
-  // ===== TRADUCIR TEXTO =====
+  const reiniciarDeteccion = () => {
+    setTextoDeletreado('');
+    setLetrasDetectadas([]);
+    setLetraActual('');
+  };
+
   const traducirFrase = () => {
     if (!frase.trim()) return;
     if (!activo) {
-      alert('Activa LAIA (el botón flotante) para que el avatar reproduzca el video.');
+      alert('Activa LAIA (botón flotante) para reproducir.');
       return;
     }
     reproducirTexto(frase);
   };
 
-  // ===== DETENER DICTADO Y LIBERAR MICRÓFONO =====
-  const stopDictado = () => {
-    escuchandoRef.current = false;
-    speechDetectedRef.current = false;
-    setEscuchando(false);
-
-    // Detener intervalos
-    if (audioDetectionRef.current) {
-      clearInterval(audioDetectionRef.current);
-      audioDetectionRef.current = null;
-    }
-    if (dictadoTimeoutRef.current) {
-      clearTimeout(dictadoTimeoutRef.current);
-      dictadoTimeoutRef.current = null;
-    }
-
-    // Detener reconocimiento de voz
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
-    }
-
-    // Detener el micrófono
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach(t => t.stop());
-      audioStreamRef.current = null;
-    }
-    if (audioContextRef.current) {
-      try { audioContextRef.current.close(); } catch (e) {}
-      audioContextRef.current = null;
-    }
-    analyserRef.current = null;
-  };
-
-  // ===== DICTADO POR VOZ (REAL O SIMULADO CON DETECCIÓN) =====
-  const toggleEscucha = async () => {
-    // Si está escuchando, detener
+  const toggleEscucha = () => {
     if (escuchando) {
-      stopDictado();
-      return;
-    }
-
-    setFrase('');
-    setEscuchando(true);
-    escuchandoRef.current = true;
-    speechDetectedRef.current = false;
-
-    // 1. Pedir permiso al micrófono y configurar detección de volumen
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
-
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      source.connect(analyser);
-
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      const tiempoInicio = Date.now();
-
-      // Detectar volumen durante 3.5 segundos
-      audioDetectionRef.current = setInterval(() => {
-        if (!analyserRef.current) return;
-        analyserRef.current.getByteFrequencyData(dataArray);
-        
-        // Calcular volumen promedio de las frecuencias de voz
-        const parteVoz = dataArray.slice(0, Math.floor(dataArray.length / 4));
-        const promedio = parteVoz.reduce((a, b) => a + b, 0) / parteVoz.length;
-
-        // Si el volumen supera el umbral → el usuario está hablando
-        if (promedio > 20) {
-          speechDetectedRef.current = true;
-        }
-      }, 100);
-
-      // 2. Iniciar reconocimiento de voz (por si la red lo permite)
-      if (recognitionRef.current) {
-        try { recognitionRef.current.start(); } catch (e) {}
-      }
-
-      // 3. Esperar 4 segundos (como si estuviera transcribiendo)
-      dictadoTimeoutRef.current = setTimeout(() => {
-        // Verificar si hubo voz
-        if (speechDetectedRef.current) {
-          // HUBO VOZ → mostrar el texto (simulando transcripción)
-          setFrase('Hola como estas');
-          
-          if (activo) {
-            setTimeout(() => reproducirTexto('Hola como estas'), 300);
-          }
-        }
-        // Si NO hubo voz, no mostrar nada
-        
-        stopDictado();
-      }, 4000);
-
-    } catch (error) {
-      console.error('Error al acceder al micrófono:', error);
-      // Si no hay permiso, no hacemos nada (sin avisos)
+      try { recognitionRef.current.stop(); } catch(e) {}
       setEscuchando(false);
-      escuchandoRef.current = false;
+    } else {
+      setFrase('');
+      try { recognitionRef.current.start(); setEscuchando(true); } catch(e) {}
     }
   };
 
@@ -441,14 +405,6 @@ function Traductor() {
     s.descripcion.toLowerCase().includes(busqueda.toLowerCase())
   );
 
-  useEffect(() => {
-    return () => {
-      detenerCamara();
-      stopDictado();
-    };
-  }, []);
-
-  // ===== ESTILOS =====
   const isDark = modoOscuro;
   const textColor = isDark ? '#edf2f0' : '#1a1a1a';
   const textMuted = isDark ? '#a8b3b0' : '#555';
@@ -458,18 +414,11 @@ function Traductor() {
 
   return (
     <div style={{
-      display: 'flex', minHeight: '100vh',
-      background: isDark ? '#080c0a' : '#f0f2f5',
+      display: 'flex', minHeight: '100vh', background: isDark ? '#080c0a' : '#f0f2f5',
       color: textColor, position: 'relative', overflow: 'hidden',
-      fontFamily: 'var(--fuente, Inter, sans-serif)',
-      padding: '24px', justifyContent: 'center'
+      fontFamily: 'var(--fuente, Inter, sans-serif)', padding: '24px', justifyContent: 'center'
     }}>
       
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none',
-        background: `radial-gradient(circle at 50% 30%, rgba(46, 154, 110, ${isDark ? 0.15 : 0.05}) 0%, transparent 60%)`
-      }} />
-
       <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: '1200px', paddingTop: '16px' }}>
 
         {/* Encabezado */}
@@ -477,29 +426,27 @@ function Traductor() {
           <button
             onClick={() => navigate('/aprendiz')}
             style={{
-              background: 'var(--color-fondo-card)', border: `1px solid ${borderColor}`,
+              background: cardBg, border: `1px solid ${borderColor}`,
               borderRadius: '12px', color: textMuted, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: '6px',
-              fontSize: '13px', fontFamily: 'var(--fuente)', padding: '8px 16px'
+              display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px'
             }}
           >
             <ArrowLeft size={16} /> Volver
           </button>
           <Languages size={28} strokeWidth={1.5} color="#2e9a6e" />
-          <h1 style={{ fontSize: 'clamp(22px, 3vw, 28px)', fontWeight: 800, margin: 0, letterSpacing: '-0.5px' }}>
-            Traductor y Diccionario
+          <h1 style={{ fontSize: '26px', fontWeight: 800, margin: 0 }}>
+            Traductor Inteligente con IA
           </h1>
         </div>
 
         {/* Selector de vista */}
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px',
-          marginBottom: '28px', background: inputBg,
-          padding: '6px', borderRadius: '14px', border: `1px solid ${borderColor}`,
-          maxWidth: '620px'
+          marginBottom: '24px', background: inputBg, padding: '6px', borderRadius: '14px',
+          border: `1px solid ${borderColor}`, maxWidth: '620px'
         }}>
           {[
-            { key: 'camara', label: 'Cámara', icon: Camera },
+            { key: 'camara', label: 'Cámara & IA', icon: Camera },
             { key: 'texto', label: 'Texto a Señas', icon: MessageSquare },
             { key: 'diccionario', label: 'Diccionario', icon: BookOpen },
           ].map(({ key, label, icon: Icon }) => (
@@ -519,47 +466,31 @@ function Traductor() {
           ))}
         </div>
 
-        {/* ===== CÁMARA ===== */}
+        {/* ===== CÁMARA CON IA ===== */}
         {vista === 'camara' && (
           <div>
-            <div style={{
-              display: 'grid', gridTemplateColumns: '1.4fr 1fr',
-              gap: '20px', alignItems: 'start'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '20px', alignItems: 'start' }}>
+              
               <div style={{
-                background: cardBg, backdropFilter: 'blur(16px)',
-                borderRadius: '20px', overflow: 'hidden',
-                border: `1px solid ${borderColor}`,
-                boxShadow: isDark ? '0 12px 40px rgba(0,0,0,0.4)' : '0 12px 40px rgba(0,0,0,0.08)'
+                background: cardBg, borderRadius: '20px', overflow: 'hidden',
+                border: `1px solid ${borderColor}`, boxShadow: '0 12px 40px rgba(0,0,0,0.2)'
               }}>
                 <div style={{
                   position: 'relative', width: '100%', aspectRatio: '4/3',
-                  background: '#0a0e0c',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  overflow: 'hidden'
+                  background: '#0a0e0c', display: 'flex', alignItems: 'center', justifyContent: 'center'
                 }}>
                   <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
+                    ref={videoRef} autoPlay playsInline muted
                     style={{
-                      width: '100%', height: '100%',
-                      objectFit: 'cover',
-                      transform: 'scaleX(-1)',
-                      display: camaraActiva ? 'block' : 'none'
+                      width: '100%', height: '100%', objectFit: 'cover',
+                      transform: 'scaleX(-1)', display: camaraActiva ? 'block' : 'none'
                     }}
                   />
                   <canvas
-                    ref={canvasRef}
-                    width={640}
-                    height={480}
+                    ref={canvasRef} width={640} height={480}
                     style={{
-                      position: 'absolute', inset: 0,
-                      width: '100%', height: '100%',
-                      transform: 'scaleX(-1)',
-                      pointerEvents: 'none',
-                      display: camaraActiva ? 'block' : 'none'
+                      position: 'absolute', inset: 0, width: '100%', height: '100%',
+                      transform: 'scaleX(-1)', pointerEvents: 'none', display: camaraActiva ? 'block' : 'none'
                     }}
                   />
 
@@ -567,28 +498,6 @@ function Traductor() {
                     <div style={{ textAlign: 'center', color: textMuted, padding: '40px' }}>
                       <CameraOff size={48} strokeWidth={1.5} style={{ opacity: 0.4, marginBottom: '12px' }} />
                       <p style={{ margin: 0, fontSize: '14px' }}>Cámara desactivada</p>
-                      <p style={{ margin: '8px 0 0', fontSize: '12px', opacity: 0.7 }}>
-                        Actívala para leer las señas
-                      </p>
-                    </div>
-                  )}
-
-                  {camaraActiva && (
-                    <div style={{
-                      position: 'absolute', top: '16px', left: '16px',
-                      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
-                      padding: '6px 12px', borderRadius: '8px',
-                      color: '#fff', fontSize: '12px', fontWeight: 600,
-                      display: 'flex', alignItems: 'center', gap: '6px',
-                      zIndex: 10
-                    }}>
-                      <div style={{
-                        width: '8px', height: '8px', borderRadius: '50%',
-                        background: landmarks.length > 0 ? '#2e9a6e' : '#f39c12',
-                        boxShadow: landmarks.length > 0 ? '0 0 10px #2e9a6e' : '0 0 10px #f39c12',
-                        animation: 'pulse 1.5s infinite'
-                      }} />
-                      {landmarks.length > 0 ? 'Mano detectada' : 'Buscando mano...'}
                     </div>
                   )}
                 </div>
@@ -600,47 +509,43 @@ function Traductor() {
                       style={{
                         flex: 1, padding: '14px', borderRadius: '12px', border: 'none',
                         background: 'linear-gradient(145deg, #1a7a4a, #2e9a6e)',
-                        color: '#fff', fontSize: '15px', fontWeight: 700,
-                        cursor: 'pointer', display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', gap: '8px',
-                        boxShadow: '0 8px 32px rgba(46,154,110,0.3)'
+                        color: '#fff', fontSize: '15px', fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
                       }}
                     >
-                      <Camera size={18} /> Activar cámara
+                      <Camera size={18} /> Activar cámara y modelo IA
                     </button>
                   ) : (
                     <>
                       <button
                         onClick={detenerCamara}
                         style={{
-                          flex: 1, padding: '12px', borderRadius: '12px',
-                          border: `1px solid ${borderColor}`, background: 'transparent',
-                          color: textMuted, fontSize: '14px', fontWeight: 600,
-                          cursor: 'pointer', display: 'flex', alignItems: 'center',
-                          justifyContent: 'center', gap: '8px'
+                          padding: '12px 16px', borderRadius: '12px', border: `1px solid ${borderColor}`,
+                          background: 'transparent', color: textMuted, cursor: 'pointer'
                         }}
                       >
-                        <CameraOff size={16} /> Apagar
+                        Apagar
+                      </button>
+                      <button
+                        onClick={() => setModoEntrenamiento(!modoEntrenamiento)}
+                        style={{
+                          flex: 1, padding: '12px', borderRadius: '12px', border: 'none',
+                          background: modoEntrenamiento ? '#f39c12' : '#34495e',
+                          color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '13px'
+                        }}
+                      >
+                        {modoEntrenamiento ? 'Modo: Entrenando IA' : 'Modo: Reconocimiento'}
                       </button>
                       <button
                         onClick={reconocerSeña}
-                        disabled={detectando}
+                        disabled={detectando || modoEntrenamiento}
                         style={{
-                          flex: 2, padding: '12px', borderRadius: '12px', border: 'none',
-                          background: detectando 
-                            ? 'rgba(46,154,110,0.4)' 
-                            : 'linear-gradient(145deg, #1a7a4a, #2e9a6e)',
-                          color: '#fff', fontSize: '14px', fontWeight: 700,
-                          cursor: detectando ? 'wait' : 'pointer',
-                          display: 'flex', alignItems: 'center',
-                          justifyContent: 'center', gap: '8px'
+                          flex: 1.5, padding: '12px', borderRadius: '12px', border: 'none',
+                          background: 'linear-gradient(145deg, #1a7a4a, #2e9a6e)',
+                          color: '#fff', fontWeight: 700, cursor: 'pointer'
                         }}
                       >
-                        {detectando ? (
-                          <><RotateCcw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Leyendo...</>
-                        ) : (
-                          <><Hand size={16} /> Leer seña</>
-                        )}
+                        {detectando ? 'Analizando...' : 'Leer Seña'}
                       </button>
                     </>
                   )}
@@ -649,8 +554,7 @@ function Traductor() {
                 {errorCamara && (
                   <div style={{
                     margin: '0 16px 16px', padding: '10px 14px',
-                    background: 'rgba(231,76,60,0.1)',
-                    border: '1px solid rgba(231,76,60,0.3)',
+                    background: 'rgba(231,76,60,0.1)', border: '1px solid rgba(231,76,60,0.3)',
                     borderRadius: '10px', color: '#e74c3c', fontSize: '12px'
                   }}>
                     {errorCamara}
@@ -658,117 +562,146 @@ function Traductor() {
                 )}
               </div>
 
-              {/* Panel de letras */}
+              {/* Panel lateral */}
               <div style={{
-                background: cardBg, backdropFilter: 'blur(16px)',
-                borderRadius: '20px', overflow: 'hidden',
-                border: `1px solid ${borderColor}`,
-                boxShadow: isDark ? '0 12px 40px rgba(0,0,0,0.4)' : '0 12px 40px rgba(0,0,0,0.08)'
+                background: cardBg, borderRadius: '20px', padding: '20px',
+                border: `1px solid ${borderColor}`
               }}>
-                <div style={{
-                  padding: '16px', borderBottom: `1px solid ${borderColor}`,
-                  display: 'flex', alignItems: 'center', gap: '10px'
-                }}>
-                  <div style={{
-                    width: '36px', height: '36px', borderRadius: '50%',
-                    background: 'linear-gradient(145deg, #1a7a4a, #2e9a6e)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center'
-                  }}>
-                    <Sparkles size={18} color="#fff" />
-                  </div>
+                {modoEntrenamiento ? (
                   <div>
-                    <h3 style={{ fontSize: '14px', fontWeight: 700, margin: 0, color: textColor }}>
-                      Lectura de la mano
+                    <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '8px', color: '#f39c12' }}>
+                      Entrenar Señas / Letras
                     </h3>
-                    <p style={{ fontSize: '11px', color: textMuted, margin: 0 }}>
-                      Letra por letra
+                    <p style={{ fontSize: '12px', color: textMuted, marginBottom: '16px' }}>
+                      Escribe la letra, haz el gesto frente a la cámara (moviendo un poco la mano) y agrega varias muestras. Luego guarda el modelo.
                     </p>
-                  </div>
-                </div>
 
-                <div style={{
-                  padding: '20px 16px',
-                  display: 'flex', flexDirection: 'column',
-                  alignItems: 'center', gap: '16px'
-                }}>
-                  <div style={{
-                    width: '120px', height: '120px', borderRadius: '24px',
-                    background: letraActual 
-                      ? 'linear-gradient(145deg, #1a7a4a, #2e9a6e)' 
-                      : inputBg,
-                    border: `2px solid ${letraActual ? '#2e9a6e' : borderColor}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    boxShadow: letraActual ? '0 0 40px rgba(46,154,110,0.5)' : 'none',
-                    transition: 'all 0.3s'
-                  }}>
-                    <span style={{
-                      fontSize: '64px', fontWeight: 800, color: '#fff',
-                      fontFamily: 'monospace',
-                      animation: letraActual ? 'pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'none'
-                    }}>
-                      {letraActual || '?'}
-                    </span>
-                  </div>
+                    <div style={{ marginBottom: '16px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                        Letra a entrenar:
+                      </label>
+                      <input
+                        type="text" maxLength={2} value={letraEntrenando}
+                        onChange={(e) => setLetraEntrenando(e.target.value.toUpperCase())}
+                        style={{
+                          width: '100%', padding: '10px', borderRadius: '10px',
+                          border: `1px solid ${borderColor}`, background: inputBg,
+                          color: textColor, fontSize: '18px', textAlign: 'center', fontWeight: 700,
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
 
-                  <div style={{
-                    width: '100%', padding: '12px',
-                    background: inputBg, borderRadius: '12px',
-                    border: `1px solid ${borderColor}`,
-                    minHeight: '60px',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    gap: '6px', flexWrap: 'wrap'
-                  }}>
-                    {letrasDetectadas.length > 0 ? (
-                      letrasDetectadas.map((letra, i) => (
-                        <span key={i} style={{
-                          fontSize: '24px', fontWeight: 800,
-                          color: '#2e9a6e', fontFamily: 'monospace',
-                          animation: 'pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
-                        }}>
-                          {letra}
-                        </span>
-                      ))
-                    ) : (
-                      <span style={{ fontSize: '12px', color: textMuted }}>
-                        Las letras aparecerán aquí
-                      </span>
-                    )}
-                  </div>
-
-                  {letrasDetectadas.length > 0 && (
                     <button
-                      onClick={reiniciarDeteccion}
+                      onClick={entrenarEjemplo}
                       style={{
-                        padding: '10px 20px', borderRadius: '10px',
-                        border: `1px solid ${borderColor}`, background: 'transparent',
-                        color: textMuted, fontSize: '12px', fontWeight: 600,
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+                        width: '100%', padding: '14px', borderRadius: '12px', border: 'none',
+                        background: '#f39c12', color: '#fff', fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                        marginBottom: '10px'
                       }}
                     >
-                      <RotateCcw size={12} /> Reiniciar
+                      <PlusCircle size={18} /> Agregar Muestra para "{letraEntrenando}"
                     </button>
-                  )}
 
-                  {camaraActiva && (
-                    <div style={{
-                      width: '100%', padding: '8px 12px',
-                      background: inputBg, borderRadius: '8px',
-                      border: `1px solid ${borderColor}`,
-                      fontSize: '10px', color: textMuted,
-                      display: 'flex', alignItems: 'center', gap: '6px'
-                    }}>
-                      <div style={{
-                        width: '6px', height: '6px', borderRadius: '50%',
-                        background: mediaPipeListo ? '#2e9a6e' : '#f39c12'
-                      }} />
-                      {mediaPipeListo 
-                        ? `${landmarks.length} puntos detectados en la mano`
-                        : 'Cargando detector de manos...'
-                      }
+                    {/* Botones de Persistencia */}
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                      <button
+                        onClick={guardarModelo}
+                        style={{
+                          flex: 1, padding: '10px', borderRadius: '10px', border: 'none',
+                          background: '#2e9a6e', color: '#fff', fontSize: '12px', fontWeight: 600,
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                        }}
+                      >
+                        <Save size={14} /> Guardar
+                      </button>
+
+                      <button
+                        onClick={cargarModeloManual}
+                        style={{
+                          flex: 1, padding: '10px', borderRadius: '10px', border: `1px solid ${borderColor}`,
+                          background: inputBg, color: textColor, fontSize: '12px', fontWeight: 600,
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                        }}
+                      >
+                        <FolderOpen size={14} /> Cargar
+                      </button>
+
+                      <button
+                        onClick={borrarModeloGuardado}
+                        title="Borrar entrenamiento guardado"
+                        style={{
+                          padding: '10px 12px', borderRadius: '10px', border: '1px solid rgba(231,76,60,0.3)',
+                          background: 'rgba(231,76,60,0.1)', color: '#e74c3c',
+                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                  )}
-                </div>
+
+                    <div style={{ fontSize: '12px', color: textMuted }}>
+                      <strong>Muestras guardadas ({Object.keys(conteoMuestras).length} letras):</strong>
+                      <div style={{ marginTop: '6px', maxHeight: '140px', overflowY: 'auto', paddingRight: '4px' }}>
+                        {Object.entries(conteoMuestras).map(([letra, count]) => (
+                          <div key={letra} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: `1px solid ${borderColor}` }}>
+                            <span>Letra <strong>{letra}</strong>:</span>
+                            <strong style={{ color: '#2e9a6e' }}>{count} muestras</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                      <Sparkles size={18} color="#2e9a6e" />
+                      <h3 style={{ fontSize: '16px', fontWeight: 700, margin: 0 }}>Resultado de IA</h3>
+                    </div>
+
+                    <div style={{
+                      width: '100px', height: '100px', borderRadius: '20px', margin: '0 auto 16px',
+                      background: letraActual ? '#2e9a6e' : inputBg,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>
+                      <span style={{ fontSize: '50px', fontWeight: 800, color: '#fff' }}>
+                        {letraActual || '?'}
+                      </span>
+                    </div>
+
+                    <div style={{
+                      padding: '12px', background: inputBg, borderRadius: '12px',
+                      minHeight: '50px', textAlign: 'center', marginBottom: '16px',
+                      fontSize: '20px', fontWeight: 700, color: '#2e9a6e', wordBreak: 'break-all'
+                    }}>
+                      {textoDeletreado || 'Esperando señas...'}
+                    </div>
+
+                    {letrasDetectadas.length > 0 && (
+                      <button
+                        onClick={reiniciarDeteccion}
+                        style={{
+                          width: '100%', padding: '10px', borderRadius: '10px',
+                          border: `1px solid ${borderColor}`, background: 'transparent',
+                          color: textMuted, cursor: 'pointer', display: 'flex',
+                          alignItems: 'center', justifyContent: 'center', gap: '6px'
+                        }}
+                      >
+                        <RotateCcw size={14} /> Limpiar texto
+                      </button>
+                    )}
+
+                    <div style={{
+                      marginTop: '16px', padding: '8px 12px', background: inputBg,
+                      borderRadius: '8px', fontSize: '11px', color: textMuted, textAlign: 'center'
+                    }}>
+                      Letras entrenadas en memoria: <strong>{Object.keys(conteoMuestras).length}</strong>
+                    </div>
+                  </div>
+                )}
               </div>
+
             </div>
           </div>
         )}
@@ -776,208 +709,57 @@ function Traductor() {
         {/* ===== TEXTO A SEÑAS ===== */}
         {vista === 'texto' && (
           <div style={{ maxWidth: '800px' }}>
-
-            {!activo && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '10px',
-                padding: '10px 16px', marginBottom: '20px',
-                background: 'rgba(243,156,18,0.1)',
-                border: '1px solid rgba(243,156,18,0.3)',
-                borderRadius: '12px',
-                color: '#f39c12', fontSize: '13px'
-              }}>
-                <Sparkles size={16} />
-                <span>
-                  LAIA está apagada. Haz clic en el botón <strong>"Activar LAIA"</strong> (esquina inferior derecha) para que reproduzca los videos.
-                </span>
-              </div>
-            )}
-
-            <div style={{
-              padding: '16px 20px', background: inputBg, borderRadius: '14px',
-              border: `1px solid ${borderColor}`, marginBottom: '20px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                <MessageSquare size={18} color="#2e9a6e" />
-                <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0, color: textColor }}>
-                  Traducir texto a Lengua de Señas
-                </h2>
-              </div>
-              <p style={{ color: textMuted, fontSize: '13px', margin: 0 }}>
-                Escribe o dicta una frase. LAIA la representará en video.
-              </p>
+            <div style={{ padding: '16px 20px', background: inputBg, borderRadius: '14px', border: `1px solid ${borderColor}`, marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>Traducir texto a Lengua de Señas</h2>
             </div>
-
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '24px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
               <input
-                type="text"
-                placeholder="Ej: Hola, ¿cómo estás?"
-                value={frase}
-                onChange={(e) => setFrase(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && traducirFrase()}
+                type="text" placeholder="Ej: Hola, ¿cómo estás?"
+                value={frase} onChange={(e) => setFrase(e.target.value)}
                 style={{
-                  flex: 1, minWidth: '250px',
-                  padding: '16px 20px', borderRadius: '14px',
+                  flex: 1, padding: '16px', borderRadius: '14px',
                   border: `2px solid ${borderColor}`, background: inputBg,
-                  color: textColor, fontSize: '15px', outline: 'none',
-                  fontFamily: 'var(--fuente)', boxSizing: 'border-box'
+                  color: textColor, fontSize: '15px', outline: 'none'
                 }}
-                onFocus={(e) => e.currentTarget.style.borderColor = '#2e9a6e'}
-                onBlur={(e) => e.currentTarget.style.borderColor = borderColor}
               />
-
               <button
                 onClick={toggleEscucha}
                 style={{
-                  padding: '0 20px',
-                  borderRadius: '14px',
-                  border: `2px solid ${escuchando ? '#e74c3c' : borderColor}`,
-                  background: escuchando 
-                    ? 'rgba(231,76,60,0.15)' 
-                    : inputBg,
-                  color: escuchando ? '#e74c3c' : textColor,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.3s',
-                  position: 'relative',
-                  minWidth: '60px'
+                  padding: '0 20px', borderRadius: '14px', border: 'none',
+                  background: escuchando ? '#e74c3c' : inputBg, color: escuchando ? '#fff' : textColor,
+                  cursor: 'pointer'
                 }}
-                title={escuchando ? 'Detener dictado' : 'Dictar por voz'}
               >
-                {escuchando ? (
-                  <>
-                    <MicOff size={22} />
-                    <span style={{
-                      position: 'absolute',
-                      inset: -3,
-                      borderRadius: '14px',
-                      border: '2px solid #e74c3c',
-                      animation: 'pulse 1.5s infinite',
-                      pointerEvents: 'none'
-                    }} />
-                  </>
-                ) : (
-                  <Mic size={22} />
-                )}
+                {escuchando ? <MicOff size={20} /> : <Mic size={20} />}
               </button>
-
               <button
                 onClick={traducirFrase}
                 style={{
-                  padding: '16px 32px', borderRadius: '14px', border: 'none',
-                  background: 'linear-gradient(145deg, #1a7a4a, #2e9a6e)',
-                  color: '#fff', fontSize: '15px', fontWeight: 700,
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px'
+                  padding: '16px 24px', borderRadius: '14px', border: 'none',
+                  background: '#2e9a6e', color: '#fff', fontWeight: 700, cursor: 'pointer'
                 }}
               >
-                <RefreshCw size={16} /> Representar
+                Representar
               </button>
             </div>
-
-            {escuchando && (
-              <div style={{
-                padding: '16px', marginBottom: '20px',
-                background: 'rgba(231,76,60,0.1)',
-                border: '1px solid rgba(231,76,60,0.3)',
-                borderRadius: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                color: '#e74c3c',
-                fontSize: '14px',
-                fontWeight: 600
-              }}>
-                <div style={{
-                  width: '10px',
-                  height: '10px',
-                  borderRadius: '50%',
-                  background: '#e74c3c',
-                  animation: 'pulse 1s infinite'
-                }} />
-                Escuchando... di algo en voz alta
-              </div>
-            )}
-
-            {frase && (
-              <div style={{
-                padding: '20px',
-                background: cardBg,
-                backdropFilter: 'blur(16px)',
-                borderRadius: '16px',
-                border: `1px solid ${borderColor}`
-              }}>
-                <p style={{ fontSize: '11px', color: textMuted, margin: 0, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '1px' }}>
-                  Texto listo para representar
-                </p>
-                <p style={{ fontSize: '20px', fontWeight: 700, color: textColor, margin: 0 }}>
-                  "{frase}"
-                </p>
-                <p style={{ fontSize: '12px', color: textMuted, margin: '12px 0 0' }}>
-                  Clic en "Representar" para que LAIA muestre el video.
-                </p>
-              </div>
-            )}
           </div>
         )}
 
         {/* ===== DICCIONARIO ===== */}
         {vista === 'diccionario' && (
           <div>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              background: cardBg, padding: '12px 18px', borderRadius: '14px',
-              border: `1px solid ${borderColor}`, marginBottom: '24px',
-              maxWidth: '500px'
-            }}>
+            <div style={{ display: 'flex', gap: '10px', background: cardBg, padding: '12px 18px', borderRadius: '14px', border: `1px solid ${borderColor}`, marginBottom: '24px', maxWidth: '500px' }}>
               <Search size={18} color={textMuted} />
               <input
-                type="text"
-                placeholder="Buscar una seña..."
-                value={busqueda}
+                type="text" placeholder="Buscar seña..." value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
-                style={{
-                  flex: 1, background: 'transparent', border: 'none',
-                  color: textColor, fontFamily: 'var(--fuente)',
-                  fontSize: '14px', outline: 'none'
-                }}
+                style={{ flex: 1, background: 'transparent', border: 'none', color: textColor, outline: 'none' }}
               />
             </div>
-
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-              gap: '20px'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '20px' }}>
               {señasFiltradas.map((seña) => (
-                <div
-                  key={seña.id}
-                  onClick={() => setPalabraSeleccionada(seña)}
-                  style={{
-                    background: cardBg, backdropFilter: 'blur(16px)',
-                    borderRadius: '20px', overflow: 'hidden',
-                    border: `1px solid ${borderColor}`,
-                    cursor: 'pointer',
-                    transition: 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-8px)';
-                    e.currentTarget.style.borderColor = 'rgba(46,154,110,0.5)';
-                    e.currentTarget.style.boxShadow = '0 20px 60px rgba(46,154,110,0.6), 0 0 40px rgba(46,154,110,0.4)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.borderColor = borderColor;
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                >
-                  <img
-                    src={seña.imagen}
-                    alt={seña.palabra}
-                    style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', display: 'block' }}
-                    onError={(e) => { e.target.style.display = 'none'; }}
-                  />
+                <div key={seña.id} onClick={() => setPalabraSeleccionada(seña)} style={{ background: cardBg, borderRadius: '20px', overflow: 'hidden', border: `1px solid ${borderColor}`, cursor: 'pointer' }}>
+                  <img src={seña.imagen} alt={seña.palabra} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover' }} />
                 </div>
               ))}
             </div>
@@ -1037,22 +819,6 @@ function Traductor() {
         )}
 
       </div>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.5; transform: scale(1.2); }
-        }
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes pop {
-          0% { transform: scale(0.3); opacity: 0; }
-          60% { transform: scale(1.2); opacity: 1; }
-          100% { transform: scale(1); }
-        }
-      `}</style>
     </div>
   );
 }
