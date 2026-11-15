@@ -5,7 +5,7 @@ import { AvatarProvider } from './context/AvatarContext';
 import AccessibilityToolbar from './components/AccessibilityToolbar';
 import AvatarVideo from './components/AvatarVideo';
 
-// ===== PÚBLICAS =====
+// ===== PÁGINAS PÚBLICAS =====
 import Bienvenida from './pages/Bienvenida';
 import Login from './pages/Login';
 
