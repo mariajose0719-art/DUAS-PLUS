@@ -1,12 +1,13 @@
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';
 
-function CursoCard({ id, titulo, instructor, progreso, color, descripcion }) {
+function CursoCard({ id, titulo, instructor, progreso, color, descripcion, onContinue }) {
   const navigate = useNavigate();
   const { modoOscuro } = useTheme();
 
   const handleContinuar = () => {
-    navigate(`/aprendiz/clase/${id}`);
+    if (onContinue) onContinue();
+    else navigate(`/aprendiz/clase/${id}`);
   };
 
   return (

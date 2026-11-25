@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Users, 
@@ -21,18 +22,26 @@ import Sidebar from '../components/Sidebar';
 
 function DashboardInstructor() {
   const navigate = useNavigate();
+  const [resumen, setResumen] = useState(null);
+  const [actividadesRecientes, setActividadesRecientes] = useState([]);
+  useEffect(() => {
+    fetch('/api/instructor/resumen', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((d) => setResumen(d.resumen))
+      .catch(() => setResumen(null));
+  }, []);
+  useEffect(() => {
+    fetch('/api/instructor/actividad-reciente', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((d) => setActividadesRecientes(d.actividades || []))
+      .catch(() => setActividadesRecientes([]));
+  }, []);
 
   const stats = [
-    { label: 'Aprendices', value: 24, icon: Users, color: '#2e9a6e', change: '+3 este mes', bg: 'rgba(46,154,110,0.12)' },
-    { label: 'Fichas activas', value: 5, icon: BookOpen, color: '#3498db', change: '2 en curso', bg: 'rgba(52,152,219,0.12)' },
-    { label: 'Clases impartidas', value: 12, icon: Calendar, color: '#f39c12', change: '4 este mes', bg: 'rgba(243,156,18,0.12)' },
-    { label: 'Progreso promedio', value: '68%', icon: TrendingUp, color: '#9b59b6', change: '+5%', bg: 'rgba(155,89,182,0.12)' },
-  ];
-
-  const actividadesRecientes = [
-    { titulo: 'Clase de Programación', fecha: 'Hoy 9:00 AM', estado: 'En vivo', color: '#2e9a6e' },
-    { titulo: 'Corrección de Taller 2', fecha: 'Mañana', estado: 'Pendiente', color: '#f39c12' },
-    { titulo: 'Reunión con equipo DUA', fecha: 'Viernes 10:00 AM', estado: 'Agendada', color: '#3498db' },
+    { label: 'Aprendices', value: resumen?.aprendices ?? '—', icon: Users, color: '#2e9a6e', change: 'En tus fichas', bg: 'rgba(46,154,110,0.12)' },
+    { label: 'Fichas activas', value: resumen?.fichas ?? '—', icon: BookOpen, color: '#3498db', change: 'Asignadas', bg: 'rgba(52,152,219,0.12)' },
+    { label: 'Cursos activos', value: resumen?.clases ?? '—', icon: Calendar, color: '#f39c12', change: 'En tus fichas', bg: 'rgba(243,156,18,0.12)' },
+    { label: 'Progreso promedio', value: resumen ? `${resumen.progreso}%` : '—', icon: TrendingUp, color: '#9b59b6', change: 'Lecciones', bg: 'rgba(155,89,182,0.12)' },
   ];
 
   return (
@@ -420,7 +429,7 @@ function DashboardInstructor() {
                         marginTop: '2px',
                         letterSpacing: '-0.2px'
                       }}>
-                        {act.fecha}
+                        {act.detalle} · {new Date(String(act.fecha).replace(' ', 'T')).toLocaleString()}
                       </div>
                     </div>
                     <span style={{
@@ -428,15 +437,16 @@ function DashboardInstructor() {
                       padding: '4px 16px',
                       borderRadius: '100px',
                       fontWeight: '500',
-                      background: `${act.color}15`,
-                      color: act.color,
-                      border: `1px solid ${act.color}20`,
+                      background: `${act.tipo === 'entrega' ? '#f39c12' : '#2e9a6e'}15`,
+                      color: act.tipo === 'entrega' ? '#f39c12' : '#2e9a6e',
+                      border: `1px solid ${act.tipo === 'entrega' ? '#f39c12' : '#2e9a6e'}20`,
                       letterSpacing: '0.3px'
                     }}>
-                      {act.estado}
+                      {act.tipo === 'entrega' ? 'Entrega recibida' : `Actividad ${act.estado}`}
                     </span>
                   </div>
                 ))}
+                {!actividadesRecientes.length && <p style={{ color: '#a8b3b0' }}>No hay actividad registrada todavía en tus fichas.</p>}
               </div>
             </div>
 

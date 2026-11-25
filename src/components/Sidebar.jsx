@@ -53,7 +53,9 @@ function Sidebar({ rol }) {
       administrador: [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/administrador' },
         { icon: Users, label: 'Instructores', path: '/administrador/instructores' },
+        { icon: Users, label: 'Aprendices', path: '/administrador/aprendices' },
         { icon: Building, label: 'Programas', path: '/administrador/programas' },
+        { icon: FileText, label: 'Fichas', path: '/administrador/fichas' },
         { icon: BarChart3, label: 'Estadísticas', path: '/administrador/estadisticas' },
         { icon: Bot, label: 'IA administrador', path: '/administrador/ia' },
         { icon: Settings, label: 'Configuración', path: '/administrador/configuracion' },

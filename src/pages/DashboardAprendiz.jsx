@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTheme, PERFILES } from '../context/ThemeContext';
 import { 
   Sparkles, 
@@ -22,28 +24,31 @@ import ThemeToggle from '../components/ThemeToggle';
 
 function DashboardAprendiz() {
   const { modoOscuro, perfil, perfilConfig } = useTheme();
-
-  // ===== CLASES DESTACADAS (solo 2) =====
-  const clasesDestacadas = [
-    { 
-      id: 3,
-      titulo: 'Accesibilidad Digital',
-      instructor: 'Ana Martínez',
-      progreso: 92,
-      color: '#f39c12',
-      descripcion: 'Pautas WCAG y herramientas'
-    },
-    { 
-      id: 1,
-      titulo: 'Fundamentos de Programación',
-      instructor: 'Carlos Rodríguez',
-      progreso: 78,
-      color: '#2e9a6e',
-      descripcion: 'Algoritmos y lógica'
-    }
-  ];
-
-  const claseActiva = clasesDestacadas[0];
+  const navigate = useNavigate();
+  const [usuario, setUsuario] = useState(null);
+  const [resumenProgreso, setResumenProgreso] = useState(null);
+  const [actividades, setActividades] = useState([]);
+  const [clasesDestacadas, setClasesDestacadas] = useState([]);
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/perfil', { credentials: 'include' }).then((r) => r.ok ? r.json() : Promise.reject()),
+      fetch('/api/aprendiz/cursos', { credentials: 'include' }).then((r) => r.ok ? r.json() : Promise.reject()),
+      fetch('/api/aprendiz/progreso', { credentials: 'include' }).then((r) => r.ok ? r.json() : Promise.reject()),
+    ]).then(([p, d, avance]) => {
+      setUsuario(p.perfil);
+      setActividades(d.actividades || []);
+      setResumenProgreso(avance.resumen);
+      setClasesDestacadas((d.cursos || []).slice(0, 2).map((curso, i) => ({
+        id: curso.id_ficha_curso,
+        titulo: curso.nombre,
+        instructor: curso.instructores || 'Instructor por asignar',
+        progreso: curso.lecciones_totales ? Math.round(100 * curso.lecciones_completadas / curso.lecciones_totales) : 0,
+        color: i ? '#3498db' : '#2e9a6e',
+        descripcion: curso.descripcion || `Programa ${curso.programa}`,
+      })));
+    }).catch(() => { setClasesDestacadas([]); setActividades([]); });
+  }, []);
+  const claseActiva = clasesDestacadas[0] || { titulo: 'tus clases' };
 
   const opcionesEncuesta = [
     { titulo: 'Excelente', descripcion: 'Muy clara' },
@@ -146,7 +151,7 @@ function DashboardAprendiz() {
                 gap: '10px',
                 letterSpacing: '-0.02em'
               }}>
-                Hola María
+                Hola {usuario?.nombres || 'Aprendiz'}
                 <Sparkles size={24} strokeWidth={2} color="#2e9a6e" className="sparkle-icon" />
               </h1>
               <p style={{
@@ -235,7 +240,7 @@ function DashboardAprendiz() {
               gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
               gap: '20px'
             }}>
-              {clasesDestacadas.map((clase, index) => (
+              {clasesDestacadas.length ? clasesDestacadas.map((clase, index) => (
                 <div key={clase.id} style={{
                   animation: `fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) ${0.15 + index * 0.1}s forwards`,
                   opacity: 0
@@ -247,9 +252,10 @@ function DashboardAprendiz() {
                     progreso={clase.progreso}
                     color={clase.color}
                     descripcion={clase.descripcion}
+                    onContinue={() => navigate('/aprendiz/clases')}
                   />
                 </div>
-              ))}
+              )) : <p style={{ color: modoOscuro ? '#a8b3b0' : '#64748b' }}>Todavía no tienes cursos asociados a tu ficha. Cuando el instructor los publique, aparecerán aquí. <a href="/aprendiz/clases" style={{ color: '#2e9a6e' }}>Ver mis clases</a></p>}
             </div>
           </div>
 
@@ -318,7 +324,7 @@ function DashboardAprendiz() {
                     color: '#2e9a6e',
                     letterSpacing: '-0.02em'
                   }}>
-                    72%
+                    {resumenProgreso?.progreso || 0}%
                   </span>
                 </div>
                 <div style={{
@@ -329,7 +335,7 @@ function DashboardAprendiz() {
                   padding: '2px'
                 }}>
                   <div style={{
-                    width: '72%',
+                  width: `${resumenProgreso?.progreso || 0}%`,
                     height: '100%',
                     background: 'linear-gradient(90deg, #1a7a4a, #2e9a6e, #36d399)',
                     borderRadius: '100px',
@@ -347,33 +353,33 @@ function DashboardAprendiz() {
                 justifyItems: 'center',
                 padding: '12px 0'
               }}>
-                <AnilloProgreso 
-                  porcentaje={92}
+                <AnilloProgreso
+                  porcentaje={resumenProgreso?.progreso || 0}
                   tamaño={84}
                   color="#2e9a6e"
-                  metrica="Comprensión"
-                  valorTexto="Excelente"
+                  metrica="Progreso real"
+                  valorTexto={`${resumenProgreso?.progreso || 0}%`}
                 />
-                <AnilloProgreso 
-                  porcentaje={85}
+                <AnilloProgreso
+                  porcentaje={resumenProgreso?.cursos ? 100 : 0}
                   tamaño={84}
                   color="#3498db"
-                  metrica="Participación"
-                  valorTexto="Alta"
+                  metrica="Cursos"
+                  valorTexto={String(resumenProgreso?.cursos || 0)}
                 />
-                <AnilloProgreso 
-                  porcentaje={90}
+                <AnilloProgreso
+                  porcentaje={resumenProgreso?.actividades ? Math.round(100 * resumenProgreso.entregadas / resumenProgreso.actividades) : 0}
                   tamaño={84}
                   color="#f39c12"
                   metrica="Entregas"
-                  valorTexto="18/20"
+                  valorTexto={`${resumenProgreso?.entregadas || 0}/${resumenProgreso?.actividades || 0}`}
                 />
-                <AnilloProgreso 
-                  porcentaje={70}
+                <AnilloProgreso
+                  porcentaje={resumenProgreso?.actividades ? Math.round(100 * resumenProgreso.evaluadas / resumenProgreso.actividades) : 0}
                   tamaño={84}
                   color="#e74c3c"
-                  metrica="Estudio"
-                  valorTexto="5h 42m"
+                  metrica="Evaluadas"
+                  valorTexto={`${resumenProgreso?.evaluadas || 0}/${resumenProgreso?.actividades || 0}`}
                 />
               </div>
 
@@ -394,7 +400,7 @@ function DashboardAprendiz() {
                   fontWeight: '500',
                   color: modoOscuro ? '#94a3b8' : '#64748b'
                 }}>
-                  Última conexión: <strong style={{ color: modoOscuro ? '#e2e8f0' : '#334155' }}>Hace 2 horas</strong>
+                  Datos sincronizados con la base de datos
                 </span>
               </div>
             </div>
@@ -449,11 +455,10 @@ function DashboardAprendiz() {
                 flexDirection: 'column',
                 gap: '12px'
               }}>
-                {[
-                  { icon: Calendar, color: '#2e9a6e', label: 'Clase en vivo', sub: 'Fundamentos', fecha: 'Hoy 9:00 AM' },
-                  { icon: FileCheck, color: '#f39c12', label: 'Entrega Taller 2', sub: 'Accesibilidad', fecha: 'Mañana' },
-                  { icon: Award, color: '#e74c3c', label: 'Evaluación', sub: 'Diseño Universal', fecha: 'Viernes' }
-                ].map((item, index) => (
+                {actividades.slice(0, 3).map((actividad, index) => {
+                  const fecha = actividad.fecha_limite ? new Date(String(actividad.fecha_limite).replace(' ', 'T')).toLocaleString() : 'Sin fecha límite';
+                  const item = { icon: FileCheck, color: '#2e9a6e', label: actividad.titulo, sub: actividad.curso, fecha };
+                  return (
                   <div key={index} style={{
                     display: 'flex',
                     justifyContent: 'space-between',
@@ -524,7 +529,8 @@ function DashboardAprendiz() {
                       {item.fecha}
                     </span>
                   </div>
-                ))}
+                ); })}
+                {!actividades.length && <p style={{ color: modoOscuro ? '#94a3b8' : '#64748b' }}>No tienes actividades publicadas todavía.</p>}
               </div>
             </div>
 
@@ -566,7 +572,7 @@ function DashboardAprendiz() {
         </div>
       </div>
 
-      <ChatLAIA nombre="María" />
+      <ChatLAIA nombre={usuario?.nombres || 'Aprendiz'} />
 
       <style>{`
         @keyframes fadeInDown {

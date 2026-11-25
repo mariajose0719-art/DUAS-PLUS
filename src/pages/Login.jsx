@@ -35,14 +35,13 @@ function Login() {
   
   // Modo Código
   const [emailOTP, setEmailOTP] = useState('');
-  const [codigoGenerado, setCodigoGenerado] = useState('');
+  const [codigoGenerado] = useState('');
   const [codigoIngresado, setCodigoIngresado] = useState('');
-  const [pasoOTP, setPasoOTP] = useState(1);
+  const [pasoOTP] = useState(1);
   
   // Modo Clásico
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rol, setRol] = useState('aprendiz');
   const [mostrarContraseña, setMostrarContraseña] = useState(false);
 
   const mediaStreamRef = useRef(null);
@@ -165,12 +164,9 @@ function Login() {
   const verificarVozExitosa = async () => {
     setEstadoVoz('verificando');
     detenerMicrofono();
-    setMensajeExito('Voz detectada. Verificando huella vocal...');
-    await hablar('Voz detectada.');
-    await new Promise(r => setTimeout(r, 500));
-    setMensajeExito('¡Huella vocal reconocida! Acceso concedido.');
-    await hablar('Huella vocal reconocida. Acceso concedido. Bienvenido a DUAS Plus.');
-    setTimeout(() => navigate('/aprendiz'), 2000);
+    setMensajeError('La voz aún no está vinculada a tu cuenta. Ingresa con correo y contraseña.');
+    setEstadoVoz('listo');
+    await hablar('La validación por voz todavía no está vinculada a tu cuenta. Ingresa con correo y contraseña.');
   };
 
   const verificarVozFallida = async () => {
@@ -214,8 +210,8 @@ function Login() {
       if (!patronGuardado) { setMensajeError('No hay patrón guardado.'); return; }
       const coincide = JSON.stringify(puntosSeleccionados) === JSON.stringify(patronGuardado);
       if (coincide) {
-        setMensajeExito('¡Patrón reconocido!');
-        setTimeout(() => navigate('/aprendiz'), 1500);
+        setMensajeError('El patrón visual aún no está vinculado a tu cuenta. Ingresa con correo y contraseña.');
+        setPuntosSeleccionados([]);
       } else {
         setMensajeError('Patrón incorrecto.');
         setPuntosSeleccionados([]);
@@ -226,26 +222,33 @@ function Login() {
   // ===== MODO CÓDIGO =====
   const generarCodigoOTP = () => {
     if (!emailOTP || !emailOTP.includes('@')) { setMensajeError('Correo inválido.'); return; }
-    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
-    setCodigoGenerado(codigo);
-    setPasoOTP(2);
-    setMensajeError('');
+    setMensajeError('El envío real de códigos aún no está configurado. Ingresa con correo y contraseña.');
   };
 
   const verificarOTP = () => {
-    if (codigoIngresado === codigoGenerado) {
-      setMensajeExito('¡Código correcto!');
-      setTimeout(() => navigate('/aprendiz'), 1500);
-    } else {
-      setMensajeError('Código incorrecto.');
-    }
+    setMensajeError('El envío real de códigos aún no está configurado. Ingresa con correo y contraseña.');
   };
 
   // ===== MODO CLÁSICO =====
-  const handleSubmitClasico = (e) => {
+  const handleSubmitClasico = async (e) => {
     e.preventDefault();
     if (!email || !password) { setMensajeError('Completa todos los campos.'); return; }
-    setTimeout(() => navigate(`/${rol}`), 1000);
+    setMensajeError('');
+    setMensajeExito('');
+    try {
+      const respuesta = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ correo: email, contrasena: password }),
+      });
+      const resultado = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok) throw new Error(resultado.mensaje || 'No se pudo iniciar sesión.');
+      setMensajeExito('Ingreso correcto.');
+      navigate(resultado.ruta);
+    } catch (error) {
+      setMensajeError(error.message || 'No se pudo conectar con el servidor de DUAS+.');
+    }
   };
 
   // ===== ESTILOS =====
@@ -639,11 +642,9 @@ function Login() {
                 {mostrarContraseña ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
-            <select value={rol} onChange={(e) => setRol(e.target.value)} style={{ width: '100%', padding: '13px 16px', borderRadius: '12px', border: `1px solid ${borderColor}`, background: inputBg, color: textColor, fontSize: '14px', outline: 'none', cursor: 'pointer' }}>
-              <option value="aprendiz">Aprendiz</option>
-              <option value="instructor">Instructor</option>
-              <option value="administrador">Administrador</option>
-            </select>
+            <p style={{ margin: '0', color: textMuted, fontSize: '12px' }}>
+              La plataforma abrirá el perfil asignado a tu cuenta.
+            </p>
             <button type="submit" style={{
               padding: '15px', borderRadius: '14px', border: 'none',
               background: 'linear-gradient(145deg, #1a7a4a, #2e9a6e)', color: '#fff',

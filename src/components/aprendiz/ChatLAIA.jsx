@@ -12,7 +12,7 @@ import {
   Move 
 } from 'lucide-react';
 
-function ChatLAIA({ nombre = 'María' }) {
+function ChatLAIA({ nombre = 'Aprendiz' }) {
   const { modoOscuro } = useTheme();
   
   // Posición del botón (se guarda en localStorage)
@@ -36,6 +36,12 @@ function ChatLAIA({ nombre = 'María' }) {
       esBienvenida: true
     }
   ]);
+
+  useEffect(() => {
+    setMensajes((actuales) => actuales.length === 1 && actuales[0].de === 'laia'
+      ? [{ ...actuales[0], texto: `¡Hola ${nombre}! Soy LAIA, tu asistente personal. ¿En qué puedo ayudarte hoy?` }]
+      : actuales);
+  }, [nombre]);
   const [input, setInput] = useState('');
   const [mostrandoOpciones, setMostrandoOpciones] = useState(true);
 
