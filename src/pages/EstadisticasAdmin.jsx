@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -12,28 +13,26 @@ import {
 
 function EstadisticasAdmin() {
   const navigate = useNavigate();
+  const [datos, setDatos] = useState({ resumen: null, distribucion: [], mensual: [] });
+  const [error, setError] = useState('');
+  useEffect(() => {
+    fetch('/api/admin/estadisticas', { credentials: 'include' })
+      .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.mensaje || 'No se pudieron cargar las estadísticas.'); return d; })
+      .then(setDatos)
+      .catch((e) => setError(e.message));
+  }, []);
 
   const stats = [
-    { label: 'Total aprendices', value: 156, icon: Users, color: '#2e9a6e', change: '+12%' },
-    { label: 'Instructores activos', value: 8, icon: BookOpen, color: '#3498db', change: '+2' },
-    { label: 'Programas activos', value: 4, icon: Award, color: '#f39c12', change: '80%' },
-    { label: 'Clases impartidas', value: 45, icon: TrendingUp, color: '#9b59b6', change: '+8' },
+    { label: 'Total aprendices activos', value: datos.resumen?.aprendices ?? '—', icon: Users, color: '#2e9a6e', change: 'Base de datos' },
+    { label: 'Instructores activos', value: datos.resumen?.instructores ?? '—', icon: BookOpen, color: '#3498db', change: 'Base de datos' },
+    { label: 'Programas activos', value: datos.resumen?.programas ?? '—', icon: Award, color: '#f39c12', change: 'Base de datos' },
+    { label: 'Cursos activos', value: datos.resumen?.clases ?? '—', icon: TrendingUp, color: '#9b59b6', change: 'Base de datos' },
   ];
-
-  const distribucionProgramas = [
-    { label: 'Desarrollo Software', value: 45, color: '#2e9a6e' },
-    { label: 'Diseño', value: 30, color: '#3498db' },
-    { label: 'Redes', value: 25, color: '#f39c12' },
-  ];
-
-  const actividadMensual = [
-    { mes: 'Ene', valor: 120 },
-    { mes: 'Feb', valor: 135 },
-    { mes: 'Mar', valor: 140 },
-    { mes: 'Abr', valor: 156 },
-  ];
-
-  const maxValor = Math.max(...actividadMensual.map(m => m.valor));
+  const colores = ['#2e9a6e', '#3498db', '#f39c12', '#9b59b6', '#e74c3c', '#1abc9c'];
+  const totalAprendices = Number(datos.resumen?.aprendices || 0);
+  const distribucionProgramas = datos.distribucion.map((item, i) => ({ label: item.label, cantidad: Number(item.value), value: totalAprendices ? Math.round(100 * Number(item.value) / totalAprendices) : 0, color: colores[i % colores.length] }));
+  const actividadMensual = datos.mensual.map((item) => ({ mes: item.mes, valor: Number(item.valor) }));
+  const maxValor = Math.max(1, ...actividadMensual.map((m) => m.valor));
 
   return (
     <div style={{
@@ -164,6 +163,7 @@ function EstadisticasAdmin() {
           }}>
             Visión completa del estado de la plataforma.
           </p>
+          {error && <p role="alert" style={{ background: '#512923', color: '#ffd0c8', padding: 14, borderRadius: 10 }}>{error}</p>}
 
           <div style={{
             display: 'grid',
@@ -235,7 +235,7 @@ function EstadisticasAdmin() {
                     fontSize: '14px',
                     marginBottom: '4px'
                   }}>
-                    <span style={{ color: '#a8b3b0' }}>{item.label}</span>
+                    <span style={{ color: '#a8b3b0' }}>{item.label} · {item.cantidad} aprendices</span>
                     <span style={{ color: item.color, fontWeight: '600' }}>{item.value}%</span>
                   </div>
                   <div style={{
@@ -254,6 +254,7 @@ function EstadisticasAdmin() {
                   </div>
                 </div>
               ))}
+              {!distribucionProgramas.length && <p style={{ color: '#a8b3b0' }}>No hay aprendices inscritos en programas activos.</p>}
             </div>
 
             <div style={{
@@ -297,6 +298,7 @@ function EstadisticasAdmin() {
                   </div>
                 ))}
               </div>
+              {!actividadMensual.length && <p style={{ color: '#a8b3b0' }}>Todavía no hay inscripciones en el período reciente.</p>}
             </div>
           </div>
         </div>

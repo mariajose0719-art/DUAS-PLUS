@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Users, 
@@ -18,18 +19,26 @@ import Sidebar from '../components/Sidebar';
 
 function DashboardAdministrador() {
   const navigate = useNavigate();
+  const [resumen, setResumen] = useState(null);
+  const [actividadesRecientes, setActividadesRecientes] = useState([]);
+  useEffect(() => {
+    fetch('/api/admin/resumen', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((d) => setResumen(d.resumen))
+      .catch(() => setResumen(null));
+  }, []);
+  useEffect(() => {
+    fetch('/api/admin/actividad-reciente', { credentials: 'include' })
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((d) => setActividadesRecientes(d.actividades || []))
+      .catch(() => setActividadesRecientes([]));
+  }, []);
 
   const stats = [
-    { label: 'Instructores', value: 8, icon: Users, color: '#2e9a6e', change: '+2 este mes', bg: 'rgba(46,154,110,0.12)' },
-    { label: 'Programas', value: 5, icon: BookOpen, color: '#3498db', change: '1 nuevo', bg: 'rgba(52,152,219,0.12)' },
-    { label: 'Aprendices totales', value: 156, icon: TrendingUp, color: '#9b59b6', change: '+12%', bg: 'rgba(155,89,182,0.12)' },
-    { label: 'Clases impartidas', value: 45, icon: BookOpen, color: '#f39c12', change: '+8 este mes', bg: 'rgba(243,156,18,0.12)' },
-  ];
-
-  const actividadesRecientes = [
-    { titulo: 'Nuevo instructor registrado', fecha: 'Hace 2 horas', estado: 'Completado', color: '#2e9a6e' },
-    { titulo: 'Programa "Redes" actualizado', fecha: 'Ayer', estado: 'Pendiente', color: '#f39c12' },
-    { titulo: 'Nuevo aprendiz registrado', fecha: 'Hace 1 día', estado: 'Completado', color: '#2e9a6e' },
+    { label: 'Instructores', value: resumen?.instructores ?? '—', icon: Users, color: '#2e9a6e', change: 'Activos', bg: 'rgba(46,154,110,0.12)' },
+    { label: 'Programas', value: resumen?.programas ?? '—', icon: BookOpen, color: '#3498db', change: 'Activos', bg: 'rgba(52,152,219,0.12)' },
+    { label: 'Aprendices totales', value: resumen?.aprendices ?? '—', icon: TrendingUp, color: '#9b59b6', change: 'Activos', bg: 'rgba(155,89,182,0.12)' },
+    { label: 'Cursos activos', value: resumen?.clases ?? '—', icon: BookOpen, color: '#f39c12', change: 'En fichas', bg: 'rgba(243,156,18,0.12)' },
   ];
 
   return (
@@ -265,7 +274,7 @@ function DashboardAdministrador() {
                         color: '#6a7a75',
                         marginTop: '2px'
                       }}>
-                        {act.fecha}
+                        {act.tipo} · {new Date(String(act.fecha).replace(' ', 'T')).toLocaleString()}
                       </div>
                     </div>
                     <span style={{
@@ -273,18 +282,15 @@ function DashboardAdministrador() {
                       padding: '4px 16px',
                       borderRadius: '100px',
                       fontWeight: '500',
-                      background: act.estado === 'Completado' ? 'rgba(46,154,110,0.12)' :
-                                 act.estado === 'Alerta' ? 'rgba(231,76,60,0.12)' :
-                                 'rgba(243,156,18,0.12)',
-                      color: act.estado === 'Completado' ? '#2e9a6e' :
-                             act.estado === 'Alerta' ? '#e74c3c' :
-                             '#f39c12',
-                      border: `1px solid ${act.estado === 'Completado' ? 'rgba(46,154,110,0.15)' : act.estado === 'Alerta' ? 'rgba(231,76,60,0.15)' : 'rgba(243,156,18,0.15)'}`
+                      background: act.estado === 'activo' ? 'rgba(46,154,110,0.12)' : 'rgba(243,156,18,0.12)',
+                      color: act.estado === 'activo' ? '#2e9a6e' : '#f39c12',
+                      border: `1px solid ${act.estado === 'activo' ? 'rgba(46,154,110,0.15)' : 'rgba(243,156,18,0.15)'}`
                     }}>
                       {act.estado}
                     </span>
                   </div>
                 ))}
+                {!actividadesRecientes.length && <p style={{ color: '#a8b3b0' }}>Todavía no hay registros recientes.</p>}
               </div>
             </div>
 
